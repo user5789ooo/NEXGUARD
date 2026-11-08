@@ -10,7 +10,14 @@ import {
   LogOut
 } from "lucide-react";
 
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import {
+  NavLink,
+  Outlet,
+  useNavigate
+} from "react-router-dom";
+
+import { useState } from "react";
+import { signOut } from "../services/auth";
 
 const navigation = [
   { label: "Overview", path: "/", icon: LayoutDashboard },
@@ -24,6 +31,29 @@ const navigation = [
 export default function Layout() {
   const navigate = useNavigate();
 
+  const [isSigningOut, setIsSigningOut] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSignOut = async () => {
+    if (isSigningOut) return;
+
+    setIsSigningOut(true);
+    setError("");
+
+    try {
+      await signOut();
+      navigate("/login", { replace: true });
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Sign out failed. Please try again."
+      );
+    } finally {
+      setIsSigningOut(false);
+    }
+  };
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -31,6 +61,7 @@ export default function Layout() {
           <div className="brand-mark">
             <ShieldCheck size={24} />
           </div>
+
           <div>
             <div className="brand-name">NEXGUARD</div>
             <div style={{ color: "#8c9ab3", fontSize: 10 }}>
@@ -64,14 +95,29 @@ export default function Layout() {
         <div style={{ marginTop: 35, padding: 13 }}>
           <div className="panel" style={{ padding: 14 }}>
             <ShieldCheck size={20} color="#36d399" />
+
             <p style={{ fontSize: 12, fontWeight: 600 }}>
               Security Center
             </p>
+
             <p className="page-subtitle">
               Secure access and consent-based device management.
             </p>
           </div>
         </div>
+
+        {error && (
+          <p
+            role="alert"
+            style={{
+              color: "#ff6b6b",
+              fontSize: 12,
+              padding: "0 13px"
+            }}
+          >
+            {error}
+          </p>
+        )}
 
         <button
           className="nav-link"
@@ -79,12 +125,17 @@ export default function Layout() {
             width: "100%",
             marginTop: 20,
             background: "transparent",
-            border: 0
+            border: 0,
+            cursor: isSigningOut ? "wait" : "pointer",
+            opacity: isSigningOut ? 0.6 : 1
           }}
-          onClick={() => navigate("/login")}
+          onClick={handleSignOut}
+          disabled={isSigningOut}
         >
           <LogOut size={19} />
-          <span>Sign out</span>
+          <span>
+            {isSigningOut ? "Signing out..." : "Sign out"}
+          </span>
         </button>
       </aside>
 
