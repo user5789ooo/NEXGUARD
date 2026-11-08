@@ -1,68 +1,41 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { Navigate } from "react-router-dom";
-import {
-  getCurrentSession,
-  onAuthStateChange
-} from "../services/auth";
+import { Navigate, Route, Routes } from "react-router-dom";
 
-type AuthStatus =
-  | "loading"
-  | "authenticated"
-  | "unauthenticated";
+import Dashboard from "./pages/Dashboard";
+import Devices from "./pages/Devices";
+import Customers from "./pages/Customers";
+import Recovery from "./pages/Recovery";
+import Activity from "./pages/Activity";
+import Settings from "./pages/Settings";
+import Login from "./pages/Login";
 
-interface ProtectedRouteProps {
-  children: ReactNode;
-}
+import Layout from "./components/Layout";
+import ProtectedRoute from "./components/ProtectedRoute";
 
-export default function ProtectedRoute({
-  children
-}: ProtectedRouteProps) {
-  const [status, setStatus] = useState<AuthStatus>("loading");
+export default function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
 
-  useEffect(() => {
-    let active = true;
-
-    const subscription = onAuthStateChange(
-      (_event, session) => {
-        if (active) {
-          setStatus(
-            session ? "authenticated" : "unauthenticated"
-          );
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <Layout />
+          </ProtectedRoute>
         }
-      }
-    );
+      >
+        <Route index element={<Dashboard />} />
+        <Route path="devices" element={<Devices />} />
+        <Route path="customers" element={<Customers />} />
+        <Route path="recovery" element={<Recovery />} />
+        <Route path="activity" element={<Activity />} />
+        <Route path="settings" element={<Settings />} />
+      </Route>
 
-    getCurrentSession()
-      .then((session) => {
-        if (active) {
-          setStatus(
-            session ? "authenticated" : "unauthenticated"
-          );
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setStatus("unauthenticated");
-        }
-      });
-
-    return () => {
-      active = false;
-      subscription?.unsubscribe();
-    };
-  }, []);
-
-  if (status === "loading") {
-    return (
-      <div className="empty-state">
-        Checking authentication...
-      </div>
-    );
-  }
-
-  if (status === "unauthenticated") {
-    return <Navigate to="/login" replace />;
-  }
-
-  return <>{children}</>;
+      <Route
+        path="*"
+        element={<Navigate to="/" replace />}
+      />
+    </Routes>
+  );
 }
