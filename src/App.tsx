@@ -1,29 +1,68 @@
+import { useEffect, useState, type ReactNode } from "react";
+import { Navigate } from "react-router-dom";
+import {
+  getCurrentSession,
+  onAuthStateChange
+} from "../services/auth";
 
-import { Navigate, Route, Routes } from "react-router-dom";
-import Dashboard from "./pages/Dashboard";
-import Devices from "./pages/Devices";
-import Customers from "./pages/Customers";
-import Recovery from "./pages/Recovery";
-import Activity from "./pages/Activity";
-import Settings from "./pages/Settings";
-import Login from "./pages/Login";
-import Layout from "./components/Layout";
+type AuthStatus =
+  | "loading"
+  | "authenticated"
+  | "unauthenticated";
 
-export default function App() {
-  return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
+interface ProtectedRouteProps {
+  children: ReactNode;
+}
 
-      <Route element={<Layout />}>
-        <Route path="/" element={<Dashboard />} />
-        <Route path="/devices" element={<Devices />} />
-        <Route path="/customers" element={<Customers />} />
-        <Route path="/recovery" element={<Recovery />} />
-        <Route path="/activity" element={<Activity />} />
-        <Route path="/settings" element={<Settings />} />
-      </Route>
+export default function ProtectedRoute({
+  children
+}: ProtectedRouteProps) {
+  const [status, setStatus] = useState<AuthStatus>("loading");
 
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
-  );
+  useEffect(() => {
+    let active = true;
+
+    const subscription = onAuthStateChange(
+      (_event, session) => {
+        if (active) {
+          setStatus(
+            session ? "authenticated" : "unauthenticated"
+          );
+        }
+      }
+    );
+
+    getCurrentSession()
+      .then((session) => {
+        if (active) {
+          setStatus(
+            session ? "authenticated" : "unauthenticated"
+          );
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setStatus("unauthenticated");
+        }
+      });
+
+    return () => {
+      active = false;
+      subscription?.unsubscribe();
+    };
+  }, []);
+
+  if (status === "loading") {
+    return (
+      <div className="empty-state">
+        Checking authentication...
+      </div>
+    );
+  }
+
+  if (status === "unauthenticated") {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <>{children}</>;
 }
