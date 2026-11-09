@@ -2,9 +2,22 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import {
-  Activity, BatteryCharging, MapPin, Smartphone, Users, Wifi,
-  ShieldCheck, Mic, Lock, AlertTriangle, Clock, Radio, Info,
-  Contact, Network, MapPinned, History, RefreshCw
+  Activity,
+  BatteryCharging,
+  MapPin,
+  Smartphone,
+  Users,
+  Wifi,
+  ShieldCheck,
+  Mic,
+  Lock,
+  AlertTriangle,
+  Info,
+  Contact,
+  Network,
+  MapPinned,
+  History,
+  RefreshCw
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 
@@ -47,12 +60,15 @@ function StatusCard({
 
 function Note({ children }: { children: ReactNode }) {
   return (
-    <p className="page-subtitle" style={{
-      marginTop: 15,
-      display: "flex",
-      alignItems: "flex-start",
-      gap: 7
-    }}>
+    <p
+      className="page-subtitle"
+      style={{
+        marginTop: 15,
+        display: "flex",
+        alignItems: "flex-start",
+        gap: 7
+      }}
+    >
       <Info size={15} style={{ flexShrink: 0, marginTop: 2 }} />
       <span>{children}</span>
     </p>
@@ -93,14 +109,14 @@ export default function Dashboard() {
 
     const [devicesResult, customersResult, telemetryResult] =
       await Promise.all([
-        supabase.from("devices").select("id", {
-          count: "exact",
-          head: true
-        }),
-        supabase.from("customers").select("id", {
-          count: "exact",
-          head: true
-        }),
+        supabase
+          .from("devices")
+          .select("id", { count: "exact", head: true }),
+
+        supabase
+          .from("customers")
+          .select("id", { count: "exact", head: true }),
+
         supabase
           .from("device_telemetry")
           .select(
@@ -110,7 +126,11 @@ export default function Dashboard() {
           .limit(100)
       ]);
 
-    if (devicesResult.error || customersResult.error || telemetryResult.error) {
+    if (
+      devicesResult.error ||
+      customersResult.error ||
+      telemetryResult.error
+    ) {
       setError(
         devicesResult.error?.message ||
         customersResult.error?.message ||
@@ -170,12 +190,6 @@ export default function Dashboard() {
     }
   ];
 
-  const latestTelemetry = [...telemetry].sort(
-    (a, b) =>
-      new Date(b.recorded_at).getTime() -
-      new Date(a.recorded_at).getTime()
-  );
-
   return (
     <div className="fade-in">
       <div className="topbar">
@@ -198,7 +212,10 @@ export default function Dashboard() {
       </div>
 
       {error && (
-        <div className="panel" style={{ marginBottom: 16, color: "#ff7777" }}>
+        <div
+          className="panel"
+          style={{ marginBottom: 16, color: "#ff7777" }}
+        >
           Dashboard data error: {error}
         </div>
       )}
@@ -206,12 +223,15 @@ export default function Dashboard() {
       <div className="stat-grid">
         {stats.map((item) => {
           const Icon = item.icon;
+
           return (
             <div className="stat-card" key={item.label}>
-              <div style={{
-                display: "flex",
-                justifyContent: "space-between"
-              }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between"
+                }}
+              >
                 <span className="stat-label">{item.label}</span>
                 <Icon size={21} color={item.color} />
               </div>
@@ -236,7 +256,7 @@ export default function Dashboard() {
           Latest status reports received from authorized companion apps.
         </p>
 
-        {latestTelemetry.length === 0 ? (
+        {telemetry.length === 0 ? (
           <div className="empty-state">
             <Smartphone size={34} style={{ opacity: 0.5 }} />
             <h3>No telemetry received</h3>
@@ -259,8 +279,9 @@ export default function Dashboard() {
                   <th>LAST UPDATE</th>
                 </tr>
               </thead>
+
               <tbody>
-                {latestTelemetry.map((item) => (
+                {telemetry.map((item) => (
                   <tr key={item.id}>
                     <td>{item.device_id.slice(0, 8)}</td>
                     <td>{item.device_status}</td>
@@ -443,4 +464,4 @@ export default function Dashboard() {
       </p>
     </div>
   );
-}
+      }
