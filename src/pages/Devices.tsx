@@ -8,8 +8,11 @@ import {
   ShieldCheck,
   X,
   Save,
-  RefreshCw
+  RefreshCw,
+  Link2,
+  CheckCircle2
 } from "lucide-react";
+
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { supabase } from "../lib/supabase";
 
@@ -35,9 +38,12 @@ export default function Devices() {
   const [devices, setDevices] = useState<Device[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState("");
+
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [pairing, setPairing] = useState(false);
+
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -46,9 +52,11 @@ export default function Devices() {
   const [model, setModel] = useState("");
   const [deviceUid, setDeviceUid] = useState("");
 
+  const [pairCode, setPairCode] = useState("");
+
   const loadData = useCallback(async () => {
     if (!supabase) {
-      setError("Supabase is not configured. Check Netlify environment variables.");
+      setError("Supabase is not configured.");
       setLoading(false);
       return;
     }
@@ -59,7 +67,9 @@ export default function Devices() {
     const [deviceResult, customerResult] = await Promise.all([
       supabase
         .from("devices")
-        .select("id, customer_id, device_name, model, device_uid, created_at, customers(full_name)")
+        .select(
+          "id, customer_id, device_name, model, device_uid, created_at, customers(full_name)"
+        )
         .order("created_at", { ascending: false }),
 
       supabase
@@ -88,6 +98,64 @@ export default function Devices() {
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  const handlePairDevice = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    const cleanCode = pairCode.replace(/\D/g, "");
+
+    if (!customerId) {
+      setError("Please select a customer.");
+      return;
+    }
+
+    if (!/^\d{8}$/.test(cleanCode)) {
+      setError("Enter a valid 8-digit Connection Code.");
+      return;
+    }
+
+    setPairing(true);
+    setError("");
+    setSuccess("");
+
+    try {
+      const { data, error: pairError } =
+        await supabase.functions.invoke("pair-device", {
+          body: {
+            code: cleanCode,
+            customer_id: customerId
+          }
+        });
+
+      if (pairError) {
+        throw new Error(pairError.message || "Device pairing failed.");
+      }
+
+      if (!data?.success) {
+        throw new Error(data?.error || "Could not pair device.");
+      }
+
+      setPairCode("");
+      setCustomerId("");
+
+      setSuccess(
+        `Device ${data.device_name || ""} paired successfully.`
+      );
+
+      await loadData();
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Device pairing failed."
+      );
+    } finally {
+      setPairing(false);
+    }
+  };
 
   const handleRegister = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -167,7 +235,7 @@ export default function Devices() {
         <div>
           <h1 className="page-title">Device Management</h1>
           <p className="page-subtitle">
-            Register devices and link them to customers.
+            Pair Android devices and manage customer devices.
           </p>
         </div>
 
@@ -192,9 +260,77 @@ export default function Devices() {
 
       {success && (
         <div className="panel" style={{ marginBottom: 16, color: "#36d399" }}>
+          <CheckCircle2 size={18} style={{ verticalAlign: "middle" }} />{" "}
           {success}
         </div>
       )}
+
+      <section className="panel" style={{ marginBottom: 22 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+          <Link2 size={23} color="#8294ff" />
+          <div>
+            <h3>Pair Android Device</h3>
+            <p className="page-subtitle">
+              Connect a phone using its 8-digit Connection Code.
+            </p>
+          </div>
+        </div>
+
+        {customers.length === 0 ? (
+          <p className="page-subtitle">
+            Register a customer first before pairing a device.
+          </p>
+        ) : (
+          <form onSubmit={handlePairDevice}>
+            <div style={{ display: "grid", gap: 14 }}>
+              <div>
+                <label>Select Customer *</label>
+                <select
+                  value={customerId}
+                  onChange={(event) => setCustomerId(event.target.value)}
+                  required
+                  style={{ width: "100%" }}
+                >
+                  <option value="">Choose a customer</option>
+                  {customers.map((customer) => (
+                    <option key={customer.id} value={customer.id}>
+                      {customer.full_name} — {customer.phone}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label>8-Digit Connection Code *</label>
+                <input
+                  value={pairCode}
+                  onChange={(event) =>
+                    setPairCode(event.target.value.replace(/\D/g, "").slice(0, 8))
+                  }
+                  placeholder="Enter code from Android APK"
+                  inputMode="numeric"
+                  maxLength={8}
+                  required
+                  style={{
+                    width: "100%",
+                    letterSpacing: 5,
+                    fontSize: 22,
+                    fontWeight: 700
+                  }}
+                />
+                <p className="page-subtitle">
+                  The code expires after 10 minutes and can only be used once.
+                </p>
+              </div>
+
+              <button className="btn" type="submit" disabled={pairing}>
+                <Link2 size={17} />
+                {pairing ? "Connecting..." : "Connect Device"}
+              </button>
+            </div>
+          </form>
+        )}
+      </section>
 
       {showForm && (
         <section className="panel" style={{ marginBottom: 22 }}>
@@ -274,11 +410,6 @@ export default function Devices() {
                     required
                   />
                 </div>
-
-                <p className="page-subtitle">
-                  Enter an identifier assigned during authorized device
-                  enrollment. This form does not pair or track a phone.
-                </p>
 
                 <button className="btn" type="submit" disabled={saving}>
                   <Save size={17} />
@@ -385,7 +516,7 @@ export default function Devices() {
                   </td>
                   <td>{device.customers?.full_name ?? "Unknown"}</td>
                   <td>
-                    <span className="status offline">Not connected</span>
+                    <span className="status offline">Status unavailable</span>
                   </td>
                   <td>Unavailable</td>
                   <td>Not available</td>
@@ -407,7 +538,7 @@ export default function Devices() {
               <p>
                 {search
                   ? "Try another device or customer name."
-                  : "Select Register Device to add your first device."}
+                  : "Pair an Android device or register your first device."}
               </p>
             </div>
           )}
@@ -415,8 +546,8 @@ export default function Devices() {
       </section>
 
       <p className="page-subtitle" style={{ marginTop: 18 }}>
-        Device registration is connected to Supabase. Live status and telemetry
-        require the authorized Android Companion App integration.
+        Pairing verifies the device connection. Live status and telemetry
+        require the Android Companion App to send updates.
       </p>
     </div>
   );
