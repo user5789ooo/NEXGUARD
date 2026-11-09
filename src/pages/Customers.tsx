@@ -1,4 +1,3 @@
-
 import {
   Users,
   Search,
@@ -8,7 +7,8 @@ import {
   RefreshCw,
   X,
   Save,
-  Trash2
+  Trash2,
+  KeyRound
 } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { supabase } from "../lib/supabase";
@@ -19,6 +19,7 @@ type Customer = {
   phone: string;
   email: string | null;
   created_at: string;
+  auth_user_id: string | null;
 };
 
 export default function Customers() {
@@ -28,6 +29,7 @@ export default function Customers() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [creatingLoginId, setCreatingLoginId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -47,7 +49,7 @@ export default function Customers() {
 
     const { data, error: fetchError } = await supabase
       .from("customers")
-      .select("id, full_name, phone, email, created_at")
+      .select("id, full_name, phone, email, created_at, auth_user_id")
       .order("created_at", { ascending: false });
 
     if (fetchError) {
@@ -117,6 +119,55 @@ export default function Customers() {
 
     await loadCustomers();
     setSaving(false);
+  };
+
+  const handleCreateLogin = async (customer: Customer) => {
+    if (!supabase || creatingLoginId) return;
+
+    if (!customer.email) {
+      setError("Add an email address to this customer first.");
+      return;
+    }
+
+    if (customer.auth_user_id) {
+      setError("This customer already has a linked login account.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Send a login invitation to ${customer.email}?\n\nThe customer will receive an email to set their own password.`
+    );
+
+    if (!confirmed) return;
+
+    setCreatingLoginId(customer.id);
+    setError("");
+    setSuccess("");
+
+    const { data, error: inviteError } =
+      await supabase.functions.invoke("create-customer-login", {
+        body: {
+          customer_id: customer.id
+        }
+      });
+
+    if (inviteError || !data?.success) {
+      setError(
+        data?.error ||
+        inviteError?.message ||
+        "Could not create customer login."
+      );
+      setCreatingLoginId(null);
+      return;
+    }
+
+    setSuccess(
+      data.message ||
+      `Login invitation sent to ${customer.email}.`
+    );
+
+    await loadCustomers();
+    setCreatingLoginId(null);
   };
 
   const handleDeleteCustomer = async (customer: Customer) => {
@@ -357,6 +408,7 @@ This action cannot be undone.`
                 <th>CUSTOMER</th>
                 <th>EMAIL</th>
                 <th>PHONE</th>
+                <th>LOGIN STATUS</th>
                 <th>DEVICES</th>
                 <th>REGISTERED</th>
                 <th>ACTION</th>
@@ -375,6 +427,15 @@ This action cannot be undone.`
 
                   <td>{customer.email || "—"}</td>
                   <td>{customer.phone}</td>
+
+                  <td>
+                    {customer.auth_user_id ? (
+                      <span style={{ color: "#36d399" }}>Linked</span>
+                    ) : (
+                      <span style={{ color: "#fbbf24" }}>Not Linked</span>
+                    )}
+                  </td>
+
                   <td>0</td>
 
                   <td>
@@ -382,23 +443,56 @@ This action cannot be undone.`
                   </td>
 
                   <td>
-                    <button
-                      type="button"
-                      className="btn"
-                      onClick={() => void handleDeleteCustomer(customer)}
-                      disabled={deletingId !== null}
-                      title="Permanently delete customer"
-                      style={{
-                        padding: "8px 10px",
-                        background: "#7f1d1d",
-                        borderColor: "#991b1b"
-                      }}
-                    >
-                      <Trash2 size={16} />
-                      {deletingId === customer.id
-                        ? "Deleting..."
-                        : "Delete"}
-                    </button>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      {!customer.auth_user_id && (
+                        <button
+                          type="button"
+                          className="btn"
+                          onClick={() => void handleCreateLogin(customer)}
+                          disabled={
+                            !customer.email ||
+                            creatingLoginId !== null ||
+                            deletingId !== null
+                          }
+                          title={
+                            customer.email
+                              ? "Create customer login"
+                              : "Customer email is required"
+                          }
+                          style={{
+                            padding: "8px 10px",
+                            background: "#3730a3",
+                            borderColor: "#4f46e5"
+                          }}
+                        >
+                          <KeyRound size={16} />
+                          {creatingLoginId === customer.id
+                            ? "Sending..."
+                            : "Create Login"}
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => void handleDeleteCustomer(customer)}
+                        disabled={
+                          deletingId !== null ||
+                          creatingLoginId !== null
+                        }
+                        title="Permanently delete customer"
+                        style={{
+                          padding: "8px 10px",
+                          background: "#7f1d1d",
+                          borderColor: "#991b1b"
+                        }}
+                      >
+                        <Trash2 size={16} />
+                        {deletingId === customer.id
+                          ? "Deleting..."
+                          : "Delete"}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               ))}
