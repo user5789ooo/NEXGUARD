@@ -1,5 +1,6 @@
 
 import type { ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
   BatteryCharging,
@@ -17,15 +18,10 @@ import {
   Contact,
   Network,
   MapPinned,
-  History
+  History,
+  RefreshCw
 } from "lucide-react";
-
-const stats = [
-  { label: "Registered Devices", value: "0", icon: Smartphone, color: "#8294ff" },
-  { label: "Registered Customers", value: "0", icon: Users, color: "#36d399" },
-  { label: "Online Devices", value: "0", icon: Wifi, color: "#29c5d8" },
-  { label: "Recovery Cases", value: "0", icon: MapPin, color: "#f5b942" }
-];
+import { supabase } from "../lib/supabase";
 
 const pendingStyle = {
   color: "#f5b942",
@@ -84,6 +80,76 @@ function SectionTitle({
 }
 
 export default function Dashboard() {
+  const [deviceCount, setDeviceCount] = useState<number | null>(null);
+  const [customerCount, setCustomerCount] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  const loadDashboardData = useCallback(async () => {
+    if (!supabase) {
+      setError("Supabase is not configured. Check Netlify environment variables.");
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    const [devicesResult, customersResult] = await Promise.all([
+      supabase
+        .from("devices")
+        .select("id", { count: "exact", head: true }),
+
+      supabase
+        .from("customers")
+        .select("id", { count: "exact", head: true })
+    ]);
+
+    if (devicesResult.error || customersResult.error) {
+      setError(
+        devicesResult.error?.message ||
+        customersResult.error?.message ||
+        "Unable to load dashboard data."
+      );
+    } else {
+      setDeviceCount(devicesResult.count ?? 0);
+      setCustomerCount(customersResult.count ?? 0);
+    }
+
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadDashboardData();
+  }, [loadDashboardData]);
+
+  const stats = [
+    {
+      label: "Registered Devices",
+      value: deviceCount === null ? "—" : String(deviceCount),
+      icon: Smartphone,
+      color: "#8294ff"
+    },
+    {
+      label: "Registered Customers",
+      value: customerCount === null ? "—" : String(customerCount),
+      icon: Users,
+      color: "#36d399"
+    },
+    {
+      label: "Online Devices",
+      value: "Pending",
+      icon: Wifi,
+      color: "#29c5d8"
+    },
+    {
+      label: "Recovery Cases",
+      value: "Pending",
+      icon: MapPin,
+      color: "#f5b942"
+    }
+  ];
+
   return (
     <div className="fade-in">
       <div className="topbar">
@@ -93,12 +159,29 @@ export default function Dashboard() {
             Device management and authorized recovery dashboard.
           </p>
         </div>
-        <span className="status online">● Dashboard Ready</span>
+
+        <button
+          className="btn"
+          onClick={() => void loadDashboardData()}
+          disabled={loading}
+          title="Refresh dashboard"
+          style={{ padding: "10px 12px" }}
+        >
+          <RefreshCw size={18} />
+          {loading ? "Loading" : "Refresh"}
+        </button>
       </div>
+
+      {error && (
+        <div className="panel" style={{ marginBottom: 16, color: "#ff7777" }}>
+          Dashboard data error: {error}
+        </div>
+      )}
 
       <div className="stat-grid">
         {stats.map((item) => {
           const Icon = item.icon;
+
           return (
             <div className="stat-card" key={item.label}>
               <div style={{ display: "flex", justifyContent: "space-between" }}>
@@ -110,6 +193,12 @@ export default function Dashboard() {
           );
         })}
       </div>
+
+      <p className="page-subtitle" style={{ marginTop: 12 }}>
+        {loading
+          ? "Loading live database counts..."
+          : "Device and customer totals are read from Supabase."}
+      </p>
 
       <section className="panel" style={{ marginTop: 22 }}>
         <SectionTitle icon={<ShieldCheck color="#36d399" size={23} />}>
@@ -144,7 +233,7 @@ export default function Dashboard() {
         <Note>
           Every session requires explicit customer approval, Android microphone
           permission, a visible foreground notification and a stop control.
-          Admin and Customer can stop an active session. No silent recording.
+          No silent recording.
         </Note>
       </section>
 
@@ -294,8 +383,9 @@ export default function Dashboard() {
       </section>
 
       <p className="page-subtitle" style={{ marginTop: 20 }}>
-        NEXGUARD Dashboard · UI preview. Actual device controls require
-        Android Companion App and backend integration.
+        NEXGUARD Dashboard · Registered device and customer totals are
+        connected to Supabase. Live telemetry requires Android Companion App
+        integration.
       </p>
     </div>
   );
