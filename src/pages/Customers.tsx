@@ -3,29 +3,122 @@ import {
   Users,
   Search,
   UserPlus,
-  ShieldCheck,
   Smartphone,
-  Mail
+  Mail,
+  RefreshCw,
+  X,
+  Save
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { supabase } from "../lib/supabase";
 
 type Customer = {
   id: string;
-  name: string;
-  email: string;
+  full_name: string;
   phone: string;
-  devices: number;
-  consent: "Granted" | "Pending" | "Revoked";
+  email: string | null;
+  created_at: string;
 };
 
 export default function Customers() {
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  // Real customer records will load from Supabase later.
-  const [customers] = useState<Customer[]>([]);
+  const [fullName, setFullName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+
+  const loadCustomers = useCallback(async () => {
+    if (!supabase) {
+      setError("Supabase is not configured. Check Netlify environment variables.");
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    const { data, error: fetchError } = await supabase
+      .from("customers")
+      .select("id, full_name, phone, email, created_at")
+      .order("created_at", { ascending: false });
+
+    if (fetchError) {
+      setError(fetchError.message);
+      setCustomers([]);
+    } else {
+      setCustomers((data ?? []) as Customer[]);
+    }
+
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadCustomers();
+  }, [loadCustomers]);
+
+  const handleAddCustomer = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    const cleanName = fullName.trim();
+    const cleanPhone = phone.trim();
+    const cleanEmail = email.trim();
+
+    if (cleanName.length < 2 || cleanPhone.length < 5) {
+      setError("Enter a valid customer name and phone number.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setSuccess("");
+
+    const { data: userData, error: userError } =
+      await supabase.auth.getUser();
+
+    if (userError || !userData.user) {
+      setError("Please log in again before adding a customer.");
+      setSaving(false);
+      return;
+    }
+
+    const { error: insertError } = await supabase
+      .from("customers")
+      .insert({
+        owner_id: userData.user.id,
+        full_name: cleanName,
+        phone: cleanPhone,
+        email: cleanEmail || null
+      });
+
+    if (insertError) {
+      setError(insertError.message);
+      setSaving(false);
+      return;
+    }
+
+    setFullName("");
+    setPhone("");
+    setEmail("");
+    setShowForm(false);
+    setSuccess("Customer added successfully.");
+
+    await loadCustomers();
+    setSaving(false);
+  };
 
   const filteredCustomers = customers.filter((customer) =>
-    `${customer.name} ${customer.email} ${customer.phone}`
+    `${customer.full_name} ${customer.email ?? ""} ${customer.phone}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
@@ -40,16 +133,91 @@ export default function Customers() {
           </p>
         </div>
 
-        <button
-          className="btn"
-          onClick={() =>
-            alert("Customer registration will be enabled after Supabase integration.")
-          }
-        >
+        <button className="btn" onClick={() => setShowForm(true)}>
           <UserPlus size={17} />
           Add Customer
         </button>
       </div>
+
+      {error && (
+        <div className="panel" style={{ marginBottom: 16, color: "#ff7777" }}>
+          {error}
+        </div>
+      )}
+
+      {success && (
+        <div className="panel" style={{ marginBottom: 16, color: "#36d399" }}>
+          {success}
+        </div>
+      )}
+
+      {showForm && (
+        <section className="panel" style={{ marginBottom: 22 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 18
+            }}
+          >
+            <h3>Register New Customer</h3>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setShowForm(false)}
+              style={{ padding: "8px 12px" }}
+            >
+              <X size={17} />
+            </button>
+          </div>
+
+          <form onSubmit={handleAddCustomer}>
+            <div style={{ display: "grid", gap: 14 }}>
+              <div>
+                <label>Full Name *</label>
+                <input
+                  value={fullName}
+                  onChange={(event) => setFullName(event.target.value)}
+                  placeholder="Enter customer name"
+                  minLength={2}
+                  maxLength={120}
+                  required
+                />
+              </div>
+
+              <div>
+                <label>Phone Number *</label>
+                <input
+                  type="tel"
+                  value={phone}
+                  onChange={(event) => setPhone(event.target.value)}
+                  placeholder="Enter phone number"
+                  minLength={5}
+                  maxLength={25}
+                  required
+                />
+              </div>
+
+              <div>
+                <label>Email Address (Optional)</label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(event) => setEmail(event.target.value)}
+                  placeholder="Enter email address"
+                  maxLength={254}
+                />
+              </div>
+
+              <button className="btn" type="submit" disabled={saving}>
+                <Save size={17} />
+                {saving ? "Saving..." : "Save Customer"}
+              </button>
+            </div>
+          </form>
+        </section>
+      )}
 
       <div className="stat-grid">
         <div className="stat-card">
@@ -61,24 +229,14 @@ export default function Customers() {
         <div className="stat-card">
           <Smartphone color="#29c5d8" size={23} />
           <div className="stat-label">Linked Devices</div>
-          <div className="stat-value">
-            {customers.reduce((sum, customer) => sum + customer.devices, 0)}
-          </div>
+          <div className="stat-value">0</div>
         </div>
 
         <div className="stat-card">
-          <ShieldCheck color="#36d399" size={23} />
-          <div className="stat-label">Consent Granted</div>
+          <Mail color="#36d399" size={23} />
+          <div className="stat-label">Email Records</div>
           <div className="stat-value">
-            {customers.filter((c) => c.consent === "Granted").length}
-          </div>
-        </div>
-
-        <div className="stat-card">
-          <Mail color="#f5b942" size={23} />
-          <div className="stat-label">Pending Consent</div>
-          <div className="stat-value">
-            {customers.filter((c) => c.consent === "Pending").length}
+            {customers.filter((customer) => customer.email).length}
           </div>
         </div>
       </div>
@@ -96,27 +254,38 @@ export default function Customers() {
           <div>
             <h3>Customer Directory</h3>
             <p className="page-subtitle">
-              Customer records and their consent status.
+              Customer records stored in the NEXGUARD database.
             </p>
           </div>
 
-          <div style={{ position: "relative", width: 270, maxWidth: "100%" }}>
-            <Search
-              size={17}
-              style={{
-                position: "absolute",
-                left: 12,
-                top: 13,
-                color: "#8c9ab3"
-              }}
-            />
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ position: "relative", width: 270, maxWidth: "100%" }}>
+              <Search
+                size={17}
+                style={{
+                  position: "absolute",
+                  left: 12,
+                  top: 13,
+                  color: "#8c9ab3"
+                }}
+              />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search customers..."
+                style={{ paddingLeft: 38 }}
+              />
+            </div>
 
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search customers..."
-              style={{ paddingLeft: 38 }}
-            />
+            <button
+              className="btn"
+              onClick={() => void loadCustomers()}
+              disabled={loading}
+              title="Refresh customers"
+              style={{ padding: "10px 12px" }}
+            >
+              <RefreshCw size={17} />
+            </button>
           </div>
         </div>
 
@@ -128,7 +297,7 @@ export default function Customers() {
                 <th>EMAIL</th>
                 <th>PHONE</th>
                 <th>DEVICES</th>
-                <th>CONSENT</th>
+                <th>REGISTERED</th>
               </tr>
             </thead>
 
@@ -136,38 +305,38 @@ export default function Customers() {
               {filteredCustomers.map((customer) => (
                 <tr key={customer.id}>
                   <td>
-                    <strong>{customer.name}</strong>
-                    <div className="page-subtitle">{customer.id}</div>
+                    <strong>{customer.full_name}</strong>
+                    <div className="page-subtitle">
+                      {customer.id.slice(0, 8)}
+                    </div>
                   </td>
-
-                  <td>{customer.email}</td>
+                  <td>{customer.email || "—"}</td>
                   <td>{customer.phone}</td>
-                  <td>{customer.devices}</td>
-
+                  <td>0</td>
                   <td>
-                    <span
-                      className={`status ${
-                        customer.consent === "Granted"
-                          ? "online"
-                          : customer.consent === "Pending"
-                            ? "pending"
-                            : "offline"
-                      }`}
-                    >
-                      {customer.consent}
-                    </span>
+                    {new Date(customer.created_at).toLocaleDateString()}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
 
-          {filteredCustomers.length === 0 && (
+          {loading && (
+            <div className="empty-state">
+              Loading customers...
+            </div>
+          )}
+
+          {!loading && filteredCustomers.length === 0 && (
             <div className="empty-state">
               <Users size={36} style={{ opacity: 0.5 }} />
-              <h3>No customers registered</h3>
+              <h3>
+                {search ? "No matching customers" : "No customers registered"}
+              </h3>
               <p>
-                Customer profiles will appear after secure registration.
+                {search
+                  ? "Try another name, email or phone number."
+                  : "Select Add Customer to register your first customer."}
               </p>
             </div>
           )}
@@ -175,7 +344,7 @@ export default function Customers() {
       </section>
 
       <p className="page-subtitle" style={{ marginTop: 18 }}>
-        Customer information will be stored securely with organization-level access controls.
+        Customer records are protected by Supabase Row Level Security.
       </p>
     </div>
   );
