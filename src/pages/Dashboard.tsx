@@ -2,26 +2,24 @@
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import {
-  Activity,
-  BatteryCharging,
-  MapPin,
-  Smartphone,
-  Users,
-  Wifi,
-  ShieldCheck,
-  Mic,
-  Lock,
-  AlertTriangle,
-  Clock,
-  Radio,
-  Info,
-  Contact,
-  Network,
-  MapPinned,
-  History,
-  RefreshCw
+  Activity, BatteryCharging, MapPin, Smartphone, Users, Wifi,
+  ShieldCheck, Mic, Lock, AlertTriangle, Clock, Radio, Info,
+  Contact, Network, MapPinned, History, RefreshCw
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
+
+type Telemetry = {
+  id: string;
+  device_id: string;
+  battery_level: number | null;
+  is_charging: boolean | null;
+  device_status: string;
+  wifi_status: string;
+  mobile_data_status: string;
+  network_type: string | null;
+  signal_status: string | null;
+  recorded_at: string;
+};
 
 const pendingStyle = {
   color: "#f5b942",
@@ -49,15 +47,12 @@ function StatusCard({
 
 function Note({ children }: { children: ReactNode }) {
   return (
-    <p
-      className="page-subtitle"
-      style={{
-        marginTop: 15,
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 7
-      }}
-    >
+    <p className="page-subtitle" style={{
+      marginTop: 15,
+      display: "flex",
+      alignItems: "flex-start",
+      gap: 7
+    }}>
       <Info size={15} style={{ flexShrink: 0, marginTop: 2 }} />
       <span>{children}</span>
     </p>
@@ -82,12 +77,13 @@ function SectionTitle({
 export default function Dashboard() {
   const [deviceCount, setDeviceCount] = useState<number | null>(null);
   const [customerCount, setCustomerCount] = useState<number | null>(null);
+  const [telemetry, setTelemetry] = useState<Telemetry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   const loadDashboardData = useCallback(async () => {
     if (!supabase) {
-      setError("Supabase is not configured. Check Netlify environment variables.");
+      setError("Supabase is not configured.");
       setLoading(false);
       return;
     }
@@ -95,25 +91,45 @@ export default function Dashboard() {
     setLoading(true);
     setError("");
 
-    const [devicesResult, customersResult] = await Promise.all([
-      supabase
-        .from("devices")
-        .select("id", { count: "exact", head: true }),
+    const [devicesResult, customersResult, telemetryResult] =
+      await Promise.all([
+        supabase.from("devices").select("id", {
+          count: "exact",
+          head: true
+        }),
+        supabase.from("customers").select("id", {
+          count: "exact",
+          head: true
+        }),
+        supabase
+          .from("device_telemetry")
+          .select(
+            "id, device_id, battery_level, is_charging, device_status, wifi_status, mobile_data_status, network_type, signal_status, recorded_at"
+          )
+          .order("recorded_at", { ascending: false })
+          .limit(100)
+      ]);
 
-      supabase
-        .from("customers")
-        .select("id", { count: "exact", head: true })
-    ]);
-
-    if (devicesResult.error || customersResult.error) {
+    if (devicesResult.error || customersResult.error || telemetryResult.error) {
       setError(
         devicesResult.error?.message ||
         customersResult.error?.message ||
+        telemetryResult.error?.message ||
         "Unable to load dashboard data."
       );
     } else {
       setDeviceCount(devicesResult.count ?? 0);
       setCustomerCount(customersResult.count ?? 0);
+
+      const latestByDevice = new Map<string, Telemetry>();
+
+      for (const item of (telemetryResult.data ?? []) as Telemetry[]) {
+        if (!latestByDevice.has(item.device_id)) {
+          latestByDevice.set(item.device_id, item);
+        }
+      }
+
+      setTelemetry(Array.from(latestByDevice.values()));
     }
 
     setLoading(false);
@@ -122,6 +138,10 @@ export default function Dashboard() {
   useEffect(() => {
     void loadDashboardData();
   }, [loadDashboardData]);
+
+  const onlineCount = telemetry.filter(
+    (item) => item.device_status === "online"
+  ).length;
 
   const stats = [
     {
@@ -138,7 +158,7 @@ export default function Dashboard() {
     },
     {
       label: "Online Devices",
-      value: "Pending",
+      value: telemetry.length === 0 ? "—" : String(onlineCount),
       icon: Wifi,
       color: "#29c5d8"
     },
@@ -149,6 +169,12 @@ export default function Dashboard() {
       color: "#f5b942"
     }
   ];
+
+  const latestTelemetry = [...telemetry].sort(
+    (a, b) =>
+      new Date(b.recorded_at).getTime() -
+      new Date(a.recorded_at).getTime()
+  );
 
   return (
     <div className="fade-in">
@@ -164,7 +190,6 @@ export default function Dashboard() {
           className="btn"
           onClick={() => void loadDashboardData()}
           disabled={loading}
-          title="Refresh dashboard"
           style={{ padding: "10px 12px" }}
         >
           <RefreshCw size={18} />
@@ -181,10 +206,12 @@ export default function Dashboard() {
       <div className="stat-grid">
         {stats.map((item) => {
           const Icon = item.icon;
-
           return (
             <div className="stat-card" key={item.label}>
-              <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <div style={{
+                display: "flex",
+                justifyContent: "space-between"
+              }}>
                 <span className="stat-label">{item.label}</span>
                 <Icon size={21} color={item.color} />
               </div>
@@ -196,9 +223,71 @@ export default function Dashboard() {
 
       <p className="page-subtitle" style={{ marginTop: 12 }}>
         {loading
-          ? "Loading live database counts..."
+          ? "Loading database and device telemetry..."
           : "Device and customer totals are read from Supabase."}
       </p>
+
+      <section className="panel" style={{ marginTop: 22 }}>
+        <SectionTitle icon={<BatteryCharging color="#36d399" size={23} />}>
+          Live Device Telemetry
+        </SectionTitle>
+
+        <p className="page-subtitle">
+          Latest status reports received from authorized companion apps.
+        </p>
+
+        {latestTelemetry.length === 0 ? (
+          <div className="empty-state">
+            <Smartphone size={34} style={{ opacity: 0.5 }} />
+            <h3>No telemetry received</h3>
+            <p>
+              Device status will appear after an authorized Android
+              Companion App sends its first report.
+            </p>
+          </div>
+        ) : (
+          <div className="table-wrap" style={{ marginTop: 18 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>DEVICE ID</th>
+                  <th>STATUS</th>
+                  <th>BATTERY</th>
+                  <th>CHARGING</th>
+                  <th>WI-FI</th>
+                  <th>MOBILE DATA</th>
+                  <th>LAST UPDATE</th>
+                </tr>
+              </thead>
+              <tbody>
+                {latestTelemetry.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.device_id.slice(0, 8)}</td>
+                    <td>{item.device_status}</td>
+                    <td>
+                      {item.battery_level === null
+                        ? "Unknown"
+                        : `${item.battery_level}%`}
+                    </td>
+                    <td>
+                      {item.is_charging === null
+                        ? "Unknown"
+                        : item.is_charging
+                          ? "Yes"
+                          : "No"}
+                    </td>
+                    <td>{item.wifi_status}</td>
+                    <td>{item.mobile_data_status}</td>
+                    <td>
+                      {new Date(item.recorded_at).toLocaleString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
 
       <section className="panel" style={{ marginTop: 22 }}>
         <SectionTitle icon={<ShieldCheck color="#36d399" size={23} />}>
@@ -280,11 +369,10 @@ export default function Dashboard() {
           Device Network Status
         </SectionTitle>
         <div className="stat-grid" style={{ marginTop: 18 }}>
-          <StatusCard label="Mobile Data" status="Unknown" />
-          <StatusCard label="Wi-Fi" status="Unknown" />
-          <StatusCard label="Network Type" status="Unknown" />
-          <StatusCard label="Signal Status" status="Unknown" />
-          <StatusCard label="Last Network Update" status="Not Available" />
+          <StatusCard label="Mobile Data" status="Companion App Required" />
+          <StatusCard label="Wi-Fi" status="Companion App Required" />
+          <StatusCard label="Network Type" status="Companion App Required" />
+          <StatusCard label="Signal Status" status="Companion App Required" />
         </div>
         <Note>
           Network status requires a paired companion app. The web dashboard
@@ -314,42 +402,9 @@ export default function Dashboard() {
           </div>
         </div>
 
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18 }}>
-          <Clock color="#f5b942" size={22} />
-          <div>
-            <strong>Last Location Timestamp</strong>
-            <p className="page-subtitle">Not available</p>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 18 }}>
-          <Radio color="#29c5d8" size={22} />
-          <div>
-            <strong>Recovery Session</strong>
-            <p className="page-subtitle">No active recovery session.</p>
-          </div>
-        </div>
-
         <Note>
-          Recovery requires verified device ownership and the relevant
-          customer permissions. Offline devices, disabled GPS or revoked
-          permissions may prevent live recovery.
-        </Note>
-      </section>
-
-      <section className="panel" style={{ marginTop: 22 }}>
-        <SectionTitle icon={<BatteryCharging color="#36d399" size={23} />}>
-          Device Monitoring
-        </SectionTitle>
-        <div className="stat-grid" style={{ marginTop: 18 }}>
-          <StatusCard label="Battery Level" status="Unknown" />
-          <StatusCard label="Charging Status" status="Unknown" />
-          <StatusCard label="Device Online" status="Unknown" />
-          <StatusCard label="Last Seen" status="Not Available" />
-        </div>
-        <Note>
-          Device information will appear after secure companion-app pairing
-          and customer authorization.
+          Recovery requires verified device ownership and customer permissions.
+          Offline devices, disabled GPS or revoked permissions may prevent live recovery.
         </Note>
       </section>
 
@@ -383,9 +438,8 @@ export default function Dashboard() {
       </section>
 
       <p className="page-subtitle" style={{ marginTop: 20 }}>
-        NEXGUARD Dashboard · Registered device and customer totals are
-        connected to Supabase. Live telemetry requires Android Companion App
-        integration.
+        NEXGUARD Dashboard · Telemetry is displayed only when reported by an
+        authorized Android Companion App.
       </p>
     </div>
   );
