@@ -5,28 +5,158 @@ import {
   Wifi,
   Search,
   Plus,
-  ShieldCheck
+  ShieldCheck,
+  X,
+  Save,
+  RefreshCw
 } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { supabase } from "../lib/supabase";
+
+type Customer = {
+  id: string;
+  full_name: string;
+  phone: string;
+};
 
 type Device = {
   id: string;
+  customer_id: string;
+  device_name: string;
   model: string;
-  customer: string;
-  status: "Online" | "Offline";
-  battery: number | null;
-  charging: boolean | null;
-  lastSeen: string;
+  device_uid: string;
+  created_at: string;
+  customers: {
+    full_name: string;
+  } | null;
 };
 
 export default function Devices() {
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [customers, setCustomers] = useState<Customer[]>([]);
   const [search, setSearch] = useState("");
+  const [showForm, setShowForm] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
 
-  // Empty until real devices are enrolled through the Android app.
-  const [devices] = useState<Device[]>([]);
+  const [customerId, setCustomerId] = useState("");
+  const [deviceName, setDeviceName] = useState("");
+  const [model, setModel] = useState("");
+  const [deviceUid, setDeviceUid] = useState("");
+
+  const loadData = useCallback(async () => {
+    if (!supabase) {
+      setError("Supabase is not configured. Check Netlify environment variables.");
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+
+    const [deviceResult, customerResult] = await Promise.all([
+      supabase
+        .from("devices")
+        .select("id, customer_id, device_name, model, device_uid, created_at, customers(full_name)")
+        .order("created_at", { ascending: false }),
+
+      supabase
+        .from("customers")
+        .select("id, full_name, phone")
+        .order("full_name", { ascending: true })
+    ]);
+
+    if (deviceResult.error) {
+      setError(deviceResult.error.message);
+      setDevices([]);
+    } else {
+      setDevices((deviceResult.data ?? []) as unknown as Device[]);
+    }
+
+    if (customerResult.error) {
+      setError(customerResult.error.message);
+      setCustomers([]);
+    } else {
+      setCustomers((customerResult.data ?? []) as Customer[]);
+    }
+
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  const handleRegister = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+
+    if (!supabase) {
+      setError("Supabase is not configured.");
+      return;
+    }
+
+    if (!customerId) {
+      setError("Please select a customer.");
+      return;
+    }
+
+    const cleanName = deviceName.trim();
+    const cleanModel = model.trim();
+    const cleanUid = deviceUid.trim();
+
+    if (!cleanName || !cleanModel || !cleanUid) {
+      setError("Please fill in all device details.");
+      return;
+    }
+
+    setSaving(true);
+    setError("");
+    setSuccess("");
+
+    const { data: userData, error: userError } =
+      await supabase.auth.getUser();
+
+    if (userError || !userData.user) {
+      setError("Please log in again.");
+      setSaving(false);
+      return;
+    }
+
+    const { error: insertError } = await supabase
+      .from("devices")
+      .insert({
+        owner_id: userData.user.id,
+        customer_id: customerId,
+        device_name: cleanName,
+        model: cleanModel,
+        device_uid: cleanUid
+      });
+
+    if (insertError) {
+      setError(
+        insertError.code === "23505"
+          ? "This Device ID is already registered."
+          : insertError.message
+      );
+      setSaving(false);
+      return;
+    }
+
+    setDeviceName("");
+    setModel("");
+    setDeviceUid("");
+    setCustomerId("");
+    setShowForm(false);
+    setSuccess("Device registered successfully.");
+
+    await loadData();
+    setSaving(false);
+  };
 
   const filteredDevices = devices.filter((device) =>
-    `${device.id} ${device.model} ${device.customer}`
+    `${device.device_name} ${device.model} ${device.device_uid} ${device.customers?.full_name ?? ""}`
       .toLowerCase()
       .includes(search.toLowerCase())
   );
@@ -37,15 +167,128 @@ export default function Devices() {
         <div>
           <h1 className="page-title">Device Management</h1>
           <p className="page-subtitle">
-            Manage enrolled devices and view consent-based telemetry.
+            Register devices and link them to customers.
           </p>
         </div>
 
-        <button className="btn" onClick={() => alert("Device pairing will be available after backend integration.")}>
+        <button
+          className="btn"
+          onClick={() => {
+            setError("");
+            setSuccess("");
+            setShowForm(true);
+          }}
+        >
           <Plus size={17} />
           Register Device
         </button>
       </div>
+
+      {error && (
+        <div className="panel" style={{ marginBottom: 16, color: "#ff7777" }}>
+          {error}
+        </div>
+      )}
+
+      {success && (
+        <div className="panel" style={{ marginBottom: 16, color: "#36d399" }}>
+          {success}
+        </div>
+      )}
+
+      {showForm && (
+        <section className="panel" style={{ marginBottom: 22 }}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              marginBottom: 18
+            }}
+          >
+            <h3>Register New Device</h3>
+
+            <button
+              type="button"
+              className="btn"
+              onClick={() => setShowForm(false)}
+              style={{ padding: "8px 12px" }}
+            >
+              <X size={17} />
+            </button>
+          </div>
+
+          {customers.length === 0 ? (
+            <p className="page-subtitle">
+              Register a customer first before adding a device.
+            </p>
+          ) : (
+            <form onSubmit={handleRegister}>
+              <div style={{ display: "grid", gap: 14 }}>
+                <div>
+                  <label>Select Customer *</label>
+                  <select
+                    value={customerId}
+                    onChange={(event) => setCustomerId(event.target.value)}
+                    required
+                    style={{ width: "100%" }}
+                  >
+                    <option value="">Choose a customer</option>
+                    {customers.map((customer) => (
+                      <option key={customer.id} value={customer.id}>
+                        {customer.full_name} — {customer.phone}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label>Device Name *</label>
+                  <input
+                    value={deviceName}
+                    onChange={(event) => setDeviceName(event.target.value)}
+                    placeholder="Example: My Android Phone"
+                    maxLength={100}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label>Device Model *</label>
+                  <input
+                    value={model}
+                    onChange={(event) => setModel(event.target.value)}
+                    placeholder="Example: Redmi Turbo 5"
+                    maxLength={100}
+                    required
+                  />
+                </div>
+
+                <div>
+                  <label>Unique Device ID *</label>
+                  <input
+                    value={deviceUid}
+                    onChange={(event) => setDeviceUid(event.target.value)}
+                    placeholder="Enter a unique device ID"
+                    maxLength={120}
+                    required
+                  />
+                </div>
+
+                <p className="page-subtitle">
+                  Enter an identifier assigned during authorized device
+                  enrollment. This form does not pair or track a phone.
+                </p>
+
+                <button className="btn" type="submit" disabled={saving}>
+                  <Save size={17} />
+                  {saving ? "Saving..." : "Save Device"}
+                </button>
+              </div>
+            </form>
+          )}
+        </section>
+      )}
 
       <div className="stat-grid">
         <div className="stat-card">
@@ -57,51 +300,66 @@ export default function Devices() {
         <div className="stat-card">
           <Wifi color="#36d399" size={23} />
           <div className="stat-label">Online</div>
-          <div className="stat-value">
-            {devices.filter((d) => d.status === "Online").length}
-          </div>
+          <div className="stat-value">0</div>
         </div>
 
         <div className="stat-card">
           <BatteryCharging color="#f5b942" size={23} />
           <div className="stat-label">Charging</div>
-          <div className="stat-value">
-            {devices.filter((d) => d.charging === true).length}
-          </div>
+          <div className="stat-value">0</div>
         </div>
 
         <div className="stat-card">
           <ShieldCheck color="#29c5d8" size={23} />
-          <div className="stat-label">Enrolled</div>
+          <div className="stat-label">Registered</div>
           <div className="stat-value">{devices.length}</div>
         </div>
       </div>
 
       <section className="panel" style={{ marginTop: 22 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 15, flexWrap: "wrap" }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 15,
+            flexWrap: "wrap"
+          }}
+        >
           <div>
             <h3>Registered Devices</h3>
             <p className="page-subtitle">
-              Device information reported by authorized companion apps.
+              Devices linked to customer records.
             </p>
           </div>
 
-          <div style={{ position: "relative", width: 260, maxWidth: "100%" }}>
-            <Search
-              size={17}
-              style={{
-                position: "absolute",
-                left: 12,
-                top: 13,
-                color: "#8c9ab3"
-              }}
-            />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search devices..."
-              style={{ paddingLeft: 38 }}
-            />
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <div style={{ position: "relative", width: 260, maxWidth: "100%" }}>
+              <Search
+                size={17}
+                style={{
+                  position: "absolute",
+                  left: 12,
+                  top: 13,
+                  color: "#8c9ab3"
+                }}
+              />
+              <input
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                placeholder="Search devices..."
+                style={{ paddingLeft: 38 }}
+              />
+            </div>
+
+            <button
+              className="btn"
+              onClick={() => void loadData()}
+              disabled={loading}
+              title="Refresh devices"
+              style={{ padding: "10px 12px" }}
+            >
+              <RefreshCw size={17} />
+            </button>
           </div>
         </div>
 
@@ -113,7 +371,6 @@ export default function Devices() {
                 <th>CUSTOMER</th>
                 <th>STATUS</th>
                 <th>BATTERY</th>
-                <th>CHARGING</th>
                 <th>LAST SEEN</th>
               </tr>
             </thead>
@@ -122,44 +379,35 @@ export default function Devices() {
               {filteredDevices.map((device) => (
                 <tr key={device.id}>
                   <td>
-                    <strong>{device.model}</strong>
-                    <div className="page-subtitle">{device.id}</div>
+                    <strong>{device.device_name}</strong>
+                    <div className="page-subtitle">{device.model}</div>
+                    <div className="page-subtitle">{device.device_uid}</div>
                   </td>
-
-                  <td>{device.customer}</td>
-
+                  <td>{device.customers?.full_name ?? "Unknown"}</td>
                   <td>
-                    <span className={`status ${device.status === "Online" ? "online" : "offline"}`}>
-                      {device.status}
-                    </span>
+                    <span className="status offline">Not connected</span>
                   </td>
-
-                  <td>
-                    {device.battery === null
-                      ? "Unavailable"
-                      : `${device.battery}%`}
-                  </td>
-
-                  <td>
-                    {device.charging === null
-                      ? "Unavailable"
-                      : device.charging
-                        ? "Charging"
-                        : "Not charging"}
-                  </td>
-
-                  <td>{device.lastSeen}</td>
+                  <td>Unavailable</td>
+                  <td>Not available</td>
                 </tr>
               ))}
             </tbody>
           </table>
 
-          {filteredDevices.length === 0 && (
+          {loading && (
+            <div className="empty-state">Loading devices...</div>
+          )}
+
+          {!loading && filteredDevices.length === 0 && (
             <div className="empty-state">
               <Smartphone size={35} style={{ opacity: 0.5 }} />
-              <h3>No devices registered</h3>
+              <h3>
+                {search ? "No matching devices" : "No devices registered"}
+              </h3>
               <p>
-                Enrolled devices will appear here after secure pairing.
+                {search
+                  ? "Try another device or customer name."
+                  : "Select Register Device to add your first device."}
               </p>
             </div>
           )}
@@ -167,7 +415,8 @@ export default function Devices() {
       </section>
 
       <p className="page-subtitle" style={{ marginTop: 18 }}>
-        Device telemetry is currently awaiting Android app and backend integration.
+        Device registration is connected to Supabase. Live status and telemetry
+        require the authorized Android Companion App integration.
       </p>
     </div>
   );
