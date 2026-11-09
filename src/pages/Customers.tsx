@@ -7,7 +7,8 @@ import {
   Mail,
   RefreshCw,
   X,
-  Save
+  Save,
+  Trash2
 } from "lucide-react";
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 import { supabase } from "../lib/supabase";
@@ -26,6 +27,7 @@ export default function Customers() {
   const [showForm, setShowForm] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
@@ -117,6 +119,63 @@ export default function Customers() {
     setSaving(false);
   };
 
+  const handleDeleteCustomer = async (customer: Customer) => {
+    if (!supabase || deletingId) return;
+
+    const confirmed = window.confirm(
+      `PERMANENT DELETE: ${customer.full_name}
+
+This permanently removes this customer record, linked devices, telemetry, permission history and pairing records.
+
+This action cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    const typed = window.prompt(
+      'Type PERMANENTLY DELETE to confirm.'
+    );
+
+    if (typed !== "PERMANENTLY DELETE") {
+      setError("Deletion cancelled. Confirmation did not match.");
+      return;
+    }
+
+    setDeletingId(customer.id);
+    setError("");
+    setSuccess("");
+
+    const { data, error: deleteError } =
+      await supabase.functions.invoke("delete-customer", {
+        body: {
+          customer_id: customer.id,
+          confirmation: "DELETE",
+          confirm_name: "PERMANENTLY DELETE"
+        }
+      });
+
+    if (deleteError || !data?.success) {
+      setError(
+        data?.error ||
+        deleteError?.message ||
+        "Customer deletion failed."
+      );
+      setDeletingId(null);
+      return;
+    }
+
+    setSuccess(
+      `Customer permanently deleted. ${data.deleted_devices ?? 0} linked device(s) removed.` +
+      (data.deleted_auth_account
+        ? " Linked login account deleted."
+        : " No linked login account was deleted.") +
+      (data.warning ? ` Warning: ${data.warning}` : "")
+    );
+
+    await loadCustomers();
+    setDeletingId(null);
+  };
+
   const filteredCustomers = customers.filter((customer) =>
     `${customer.full_name} ${customer.email ?? ""} ${customer.phone}`
       .toLowerCase()
@@ -162,6 +221,7 @@ export default function Customers() {
             }}
           >
             <h3>Register New Customer</h3>
+
             <button
               type="button"
               className="btn"
@@ -269,6 +329,7 @@ export default function Customers() {
                   color: "#8c9ab3"
                 }}
               />
+
               <input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
@@ -298,6 +359,7 @@ export default function Customers() {
                 <th>PHONE</th>
                 <th>DEVICES</th>
                 <th>REGISTERED</th>
+                <th>ACTION</th>
               </tr>
             </thead>
 
@@ -310,11 +372,33 @@ export default function Customers() {
                       {customer.id.slice(0, 8)}
                     </div>
                   </td>
+
                   <td>{customer.email || "—"}</td>
                   <td>{customer.phone}</td>
                   <td>0</td>
+
                   <td>
                     {new Date(customer.created_at).toLocaleDateString()}
+                  </td>
+
+                  <td>
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => void handleDeleteCustomer(customer)}
+                      disabled={deletingId !== null}
+                      title="Permanently delete customer"
+                      style={{
+                        padding: "8px 10px",
+                        background: "#7f1d1d",
+                        borderColor: "#991b1b"
+                      }}
+                    >
+                      <Trash2 size={16} />
+                      {deletingId === customer.id
+                        ? "Deleting..."
+                        : "Delete"}
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -330,9 +414,13 @@ export default function Customers() {
           {!loading && filteredCustomers.length === 0 && (
             <div className="empty-state">
               <Users size={36} style={{ opacity: 0.5 }} />
+
               <h3>
-                {search ? "No matching customers" : "No customers registered"}
+                {search
+                  ? "No matching customers"
+                  : "No customers registered"}
               </h3>
+
               <p>
                 {search
                   ? "Try another name, email or phone number."
